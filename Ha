@@ -153,17 +153,78 @@ RunService.RenderStepped:Connect(function()
 end)
 
 local TabESP = Window:Tab({Title="ESP", Icon="eye"})
+})
 
--- ESP Name (เหมือนเดิม)
-local ESPNameEnabled = false
+
+-- =====================
+-- 1. Toggle UI สร้างก่อน
+-- =====================
+local ESPNameEnabled, TraceEnabled, ESPHighlightEnabled, ESPItemEnabled = false, false, false, false
+
+TabESP:Toggle({
+    Title="ESP Name",
+    Default=false,
+    Callback=function(state)
+        ESPNameEnabled = state
+        updateAllESPName()
+    end
+})
+
+TabESP:Toggle({
+    Title="ESP Trace",
+    Default=false,
+    Callback=function(state)
+        TraceEnabled = state
+        updateAllTraces()
+    end
+})
+
+TabESP:Toggle({
+    Title="ESP Highlight",
+    Default=false,
+    Callback=function(state)
+        ESPHighlightEnabled = state
+        updateAllHighlights()
+    end
+})
+
+TabESP:Toggle({
+    Title="ESP Item",
+    Default=false,
+    Callback=function(state)
+        ESPItemEnabled = state
+        updateAllItemESP()
+    end
+})
+
+-- =====================
+-- 2. ตัวแปรและตารางที่ ESP ต้องใช้
+-- =====================
+local BillboardCache, ItemESP_UpdateConnections = {}, {}
+local Traces = {}
+local Highlights = {}
+local WeaponDB, PreloadedImages = {}, {}
+local RARITY_COLORS = {
+    ["Common"]=Color3.fromRGB(255,255,255),
+    ["Uncommon"]=Color3.fromRGB(99,255,52),
+    ["Rare"]=Color3.fromRGB(51,170,255),
+    ["Epic"]=Color3.fromRGB(237,44,255),
+    ["Legendary"]=Color3.fromRGB(255,150,0),
+    ["Omega"]=Color3.fromRGB(255,20,51),
+}
+
+-- =====================
+-- 3. ฟังก์ชัน ESP Name
+-- =====================
 local function createESP(player)
-    if player == LocalPlayer then return end
+    if player==LocalPlayer then return end
     local function addBillboard(character)
-        local head = character:WaitForChild("Head",5)
+        local head = character:FindFirstChild("Head")
         if not head then return end
         local old = head:FindFirstChild("ESPBillboard")
         if old then old:Destroy() end
         if not ESPNameEnabled then return end
+
         local billboard = Instance.new("BillboardGui")
         billboard.Name = "ESPBillboard"
         billboard.Adornee = head
@@ -171,6 +232,7 @@ local function createESP(player)
         billboard.Size = UDim2.new(0,100,0,20)
         billboard.StudsOffset = Vector3.new(0,1.5,0)
         billboard.Parent = head
+
         local text = Instance.new("TextLabel")
         text.Size = UDim2.new(1,0,1,0)
         text.BackgroundTransparency = 1
@@ -180,46 +242,37 @@ local function createESP(player)
         text.Font = Enum.Font.Gotham
         text.TextStrokeTransparency = 0.9
         text.Parent = billboard
+
+        character:WaitForChild("HumanoidRootPart") -- ensure character fully loaded
         player.CharacterRemoving:Connect(function()
             if billboard then billboard:Destroy() end
         end)
     end
+
     if player.Character then addBillboard(player.Character) end
     player.CharacterAdded:Connect(addBillboard)
 end
 
-TabESP:Toggle({
-    Title="ESP Name",
-    Default=false,
-    Callback=function(state)
-        ESPNameEnabled = state
-        if state then
-            for _,player in ipairs(Players:GetPlayers()) do createESP(player) end
-            Players.PlayerAdded:Connect(createESP)
-        else
-            for _, player in ipairs(Players:GetPlayers()) do
-                local head = player.Character and player.Character:FindFirstChild("Head")
-                if head then
-                    local b = head:FindFirstChild("ESPBillboard")
-                    if b then b:Destroy() end
-                end
-            end
-        end
+function updateAllESPName()
+    for _,p in ipairs(Players:GetPlayers()) do
+        if ESPNameEnabled then createESP(p) end
     end
-})
+end
 
--- ESP Trace (เหมือนเดิม)
-local Traces = {}
-local TraceEnabled = false
+-- =====================
+-- 4. ฟังก์ชัน ESP Trace
+-- =====================
 local function createTrace(player)
-    if player == LocalPlayer then return end
+    if player==LocalPlayer then return end
     if Traces[player] then return end
+
     local line = Drawing.new("Line")
     line.Color = Color3.fromRGB(0,170,255)
     line.Thickness = 2
     line.Visible = TraceEnabled
     Traces[player] = line
 end
+
 local function removeTrace(player)
     if Traces[player] then
         Traces[player]:Remove()
@@ -227,28 +280,21 @@ local function removeTrace(player)
     end
 end
 
-TabESP:Toggle({
-    Title="ESP Trace",
-    Default=false,
-    Callback=function(state)
-        TraceEnabled = state
-        if state then
-            for _,player in pairs(Players:GetPlayers()) do createTrace(player) end
-            Players.PlayerAdded:Connect(createTrace)
-            Players.PlayerRemoving:Connect(removeTrace)
-        else
-            for player,_ in pairs(Traces) do removeTrace(player) end
-        end
+function updateAllTraces()
+    for _,p in ipairs(Players:GetPlayers()) do
+        if TraceEnabled then createTrace(p)
+        else removeTrace(p) end
     end
-})
+end
 
 RunService.RenderStepped:Connect(function()
     if not TraceEnabled then return end
-    local screenCenterTop = Vector2.new(Camera.ViewportSize.X/2,0)
+    local camera = workspace.CurrentCamera
+    local screenCenterTop = Vector2.new(camera.ViewportSize.X/2,0)
     for player,line in pairs(Traces) do
-        local character = player.Character
-        if character and character:FindFirstChild("HumanoidRootPart") then
-            local pos, onScreen = Camera:WorldToViewportPoint(character.HumanoidRootPart.Position)
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            local pos, onScreen = camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
             line.Visible = onScreen
             if onScreen then
                 line.From = screenCenterTop
@@ -260,9 +306,9 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- ESP Highlight
-local ESPHighlightEnabled = false
-local Highlights = {}
+-- =====================
+-- 5. ฟังก์ชัน ESP Highlight
+-- =====================
 local function healthToColor(hp,maxHp)
     if not maxHp or maxHp<=0 then maxHp=100 end
     if hp<=0 then return Color3.fromRGB(0,0,0) end
@@ -271,7 +317,7 @@ local function healthToColor(hp,maxHp)
     else return Color3.fromRGB(0,255,0) end
 end
 
-local function createHighlight(player,character)
+local function createHighlight(player, character)
     if not character or player==LocalPlayer then return end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
@@ -307,107 +353,57 @@ local function cleanupHighlight(player)
     local record = Highlights[player]
     if record then
         for _,c in ipairs(record.Connections) do
-            if c and c.Disconnect then pcall(function() c:Disconnect() end) end
+            pcall(function() c:Disconnect() end)
         end
         pcall(function() if record.Instance then record.Instance:Destroy() end end)
         Highlights[player]=nil
     end
 end
 
-Players.PlayerAdded:Connect(function(player)
-    if player==LocalPlayer then return end
-    player.CharacterAdded:Connect(function(char) task.defer(function() if ESPHighlightEnabled then createHighlight(player,char) end end) end)
-    if player.Character and ESPHighlightEnabled then createHighlight(player,player.Character) end
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-    cleanupHighlight(player)
-end)
-
-for _,player in pairs(Players:GetPlayers()) do
-    if player~=LocalPlayer and player.Character and ESPHighlightEnabled then
-        createHighlight(player,player.Character)
+function updateAllHighlights()
+    for _,p in ipairs(Players:GetPlayers()) do
+        if ESPHighlightEnabled and p.Character then createHighlight(p,p.Character)
+        else cleanupHighlight(p) end
     end
 end
 
-TabESP:Toggle({
-    Title="ESP Highlight",
-    Default=false,
-    Callback=function(state)
-        ESPHighlightEnabled = state
-        if state then
-            for _,player in pairs(Players:GetPlayers()) do
-                if player.Character then createHighlight(player,player.Character) end
-            end
-        else
-            for player,_ in pairs(Highlights) do cleanupHighlight(player) end
-        end
-    end
-})
--- Toggle UI
-local ESPItemEnabled = false
-TabESP:Toggle({
-    Title = "ESP Item",
-    Default = false,
-    Callback = function(state)
-        ESPItemEnabled = state
-        ItemESP_Enabled = state
-        updateAllPlayersESP()
-    end
-})
-
--- ตัวแปรและตารางที่ ESP Item ต้องใช้
-local ItemESP_Enabled = false
-local BillboardCache = {}
-local ItemESP_UpdateConnections = {}
-local WeaponDB = {}
-local PreloadedImages = {}
-
-local RARITY_COLORS = {
-    ["Common"] = Color3.fromRGB(255, 255, 255),
-    ["Uncommon"] = Color3.fromRGB(99, 255, 52),
-    ["Rare"] = Color3.fromRGB(51, 170, 255),
-    ["Epic"] = Color3.fromRGB(237, 44, 255),
-    ["Legendary"] = Color3.fromRGB(255, 150, 0),
-    ["Omega"] = Color3.fromRGB(255, 20, 51),
-}
-
--- ฟังก์ชันสร้าง Unique Key ของไอเทม
+-- =====================
+-- 6. ฟังก์ชัน ESP Item
+-- =====================
+-- ฟังก์ชันสร้าง Unique Key
 local function generateUniqueKey(tool)
     if not tool or not tool:IsA("Tool") then return nil end
     local itemId = tool:GetAttribute("ItemId") or tool:GetAttribute("Id")
-    if itemId and itemId ~= "" then
-        return "ITEMID_" .. tostring(itemId)
-    end
+    if itemId and itemId ~= "" then return "ITEMID_"..tostring(itemId) end
 
     local partsData = {}
-    for _, part in ipairs(tool:GetDescendants()) do
-        if part:IsA("SpecialMesh") and part.MeshId and part.MeshId ~= "" then
-            table.insert(partsData, "MESH_"..part.MeshId.."|TEX_"..(part.TextureId or "NOTEX"))
-        elseif part:IsA("MeshPart") and part.MeshId and part.MeshId ~= "" then
-            table.insert(partsData, "MESH_"..part.MeshId.."|TEX_"..(part.TextureID or "NOTEX"))
-        elseif part:IsA("Decal") and part.Texture and part.Texture ~= "" then
-            table.insert(partsData, "DECAL_"..part.Texture)
+    for _,part in ipairs(tool:GetDescendants()) do
+        if part:IsA("SpecialMesh") and part.MeshId and part.MeshId~="" then
+            table.insert(partsData,"MESH_"..part.MeshId.."|TEX_"..(part.TextureId or "NOTEX"))
+        elseif part:IsA("MeshPart") and part.MeshId~="" then
+            table.insert(partsData,"MESH_"..part.MeshId.."|TEX_"..(part.TextureID or "NOTEX"))
+        elseif part:IsA("Decal") and part.Texture~="" then
+            table.insert(partsData,"DECAL_"..part.Texture)
         elseif part:IsA("Part") then
-            table.insert(partsData, "PART_"..part.Name.."_"..part.Size.X.."x"..part.Size.Y.."x"..part.Size.Z)
+            table.insert(partsData,"PART_"..part.Name.."_"..part.Size.X.."x"..part.Size.Y.."x"..part.Size.Z)
         end
     end
 
-    if #partsData > 0 then
+    if #partsData>0 then
         table.sort(partsData)
-        return "MESHKEY_" .. table.concat(partsData, ";")
+        return "MESHKEY_"..table.concat(partsData,";")
     end
 
     local displayName = tool:GetAttribute("DisplayName") or tool.Name
     local toolName = tool.Name
     local rarity = tool:GetAttribute("RarityName") or tool:GetAttribute("Rarity") or "Unknown"
     local imageId = tool:GetAttribute("ImageId") or "NOIMAGE"
-    return "NAME_" .. displayName .. "_" .. toolName .. "_" .. rarity .. "_" .. imageId
+    return "NAME_"..displayName.."_"..toolName.."_"..rarity.."_"..imageId
 end
 
--- ลงทะเบียนไอเทมทั้งหมด
+-- ลงทะเบียนไอเทม
 local function registerItems(folder)
-    for _, tool in ipairs(folder:GetDescendants()) do
+    for _,tool in ipairs(folder:GetDescendants()) do
         if not tool:IsA("Tool") then continue end
         local key = generateUniqueKey(tool)
         if not key then continue end
@@ -416,19 +412,13 @@ local function registerItems(folder)
         local imageId = tool:GetAttribute("ImageId") or "rbxassetid://7072725737"
         local rarity = tool:GetAttribute("RarityName") or tool:GetAttribute("Rarity") or "Common"
 
-        WeaponDB[key] = {
-            Name = displayName,
-            Rarity = rarity,
-            ImageId = imageId,
-            ToolName = tool.Name,
-            Key = key
-        }
+        WeaponDB[key] = {Name=displayName,Rarity=rarity,ImageId=imageId,ToolName=tool.Name,Key=key}
 
-        if imageId and imageId ~= "" and not PreloadedImages[imageId] then
-            PreloadedImages[imageId] = true
+        if imageId~="" and not PreloadedImages[imageId] then
+            PreloadedImages[imageId]=true
             task.spawn(function()
                 pcall(function()
-                    game:GetService("ContentProvider"):PreloadAsync({imageId})
+                    ContentProvider:PreloadAsync({imageId})
                 end)
             end)
         end
@@ -437,9 +427,9 @@ end
 
 -- โหลดไอเทมจาก ReplicatedStorage / StarterPack
 pcall(function()
-    local itemsFolder = ReplicatedStorage:WaitForChild("Items", 5)
+    local itemsFolder = ReplicatedStorage:WaitForChild("Items",5)
     if itemsFolder then registerItems(itemsFolder) end
-    for _, obj in ipairs(ReplicatedStorage:GetChildren()) do
+    for _,obj in ipairs(ReplicatedStorage:GetChildren()) do
         if obj:IsA("Folder") and (obj.Name:find("Weapon") or obj.Name:find("Item") or obj.Name:find("Tool")) then
             registerItems(obj)
         end
@@ -447,57 +437,45 @@ pcall(function()
     registerItems(game:GetService("StarterPack"))
 end)
 
--- ฟังก์ชันดึงข้อมูลไอเทม
 local function getWeaponInfo(tool)
     if not tool or not tool:IsA("Tool") then return nil end
     local key = generateUniqueKey(tool)
     return WeaponDB[key]
 end
 
--- ฟังก์ชันสร้าง Billboard ให้ผู้เล่น
 local function createBillboardForPlayer(player)
-    if player == LocalPlayer or BillboardCache[player] then return end
+    if player==LocalPlayer or BillboardCache[player] then return end
     if not ESPItemEnabled then return end
-
     local char = player.Character
     if not char then return end
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then return end
 
-    -- ลบของเดิมถ้ามี
-    if BillboardCache[player] then
-        BillboardCache[player]:Destroy()
-        BillboardCache[player] = nil
-    end
-
     local billboard = Instance.new("BillboardGui")
     billboard.Name = "ItemESP"
     billboard.Adornee = hrp
-    billboard.Size = UDim2.new(0, 280, 0, 40)
-    billboard.StudsOffset = Vector3.new(0, -6.5, 0)
+    billboard.Size = UDim2.new(0,280,0,40)
+    billboard.StudsOffset = Vector3.new(0,-6.5,0)
     billboard.AlwaysOnTop = true
-    billboard.LightInfluence = 0
     billboard.Parent = hrp
 
-    local container = Instance.new("Frame", billboard)
+    local container = Instance.new("Frame")
     container.Size = UDim2.new(1,0,1,0)
     container.BackgroundTransparency = 1
+    container.Parent = billboard
 
-    -- ฟังก์ชันอัพเดตไอเทม
     local function updateESP()
-        if not ItemESP_Enabled or not billboard.Parent then return end
+        if not ESPItemEnabled or not billboard.Parent then return end
         local currentTools = {}
-
         local function scan(folder)
             if not folder then return end
-            for _, tool in ipairs(folder:GetChildren()) do
-                if tool:IsA("Tool") and tool.Name ~= "Fists" then
+            for _,tool in ipairs(folder:GetChildren()) do
+                if tool:IsA("Tool") and tool.Name~="Fists" then
                     local info = getWeaponInfo(tool)
-                    if info then table.insert(currentTools, info) end
+                    if info then table.insert(currentTools,info) end
                 end
             end
         end
-
         scan(char)
         local backpack = player:FindFirstChild("Backpack")
         if backpack then scan(backpack) end
@@ -508,7 +486,7 @@ local function createBillboardForPlayer(player)
         layout.Padding = UDim.new(0,2)
         layout.Parent = container
 
-        for i, info in ipairs(currentTools) do
+        for i,info in ipairs(currentTools) do
             local text = Instance.new("TextLabel")
             text.Size = UDim2.new(1,0,0,14)
             text.BackgroundTransparency = 1
@@ -522,44 +500,56 @@ local function createBillboardForPlayer(player)
         end
     end
 
-    -- เชื่อมต่อ Event
-    table.insert(ItemESP_UpdateConnections, char.ChildAdded:Connect(function(child)
+    table.insert(ItemESP_UpdateConnections,char.ChildAdded:Connect(function(child)
         if child:IsA("Tool") then task.defer(updateESP) end
     end))
-    table.insert(ItemESP_UpdateConnections, char.ChildRemoved:Connect(function(child)
+    table.insert(ItemESP_UpdateConnections,char.ChildRemoved:Connect(function(child)
         if child:IsA("Tool") then task.defer(updateESP) end
     end))
 
     updateESP()
-    BillboardCache[player] = billboard
+    BillboardCache[player]=billboard
 end
 
--- ฟังก์ชันอัพเดต ESP ให้ผู้เล่นทั้งหมด
-function updateAllPlayersESP()
-    for _, p in ipairs(Players:GetPlayers()) do
-        if ESPItemEnabled then
-            createBillboardForPlayer(p)
+function updateAllItemESP()
+    for _,p in ipairs(Players:GetPlayers()) do
+        if ESPItemEnabled then createBillboardForPlayer(p)
         else
             if BillboardCache[p] then
                 BillboardCache[p]:Destroy()
-                BillboardCache[p] = nil
+                BillboardCache[p]=nil
             end
         end
     end
 end
 
--- สร้าง ESP ให้ผู้เล่นทั้งหมดตอนรัน
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then createBillboardForPlayer(p) end
-end
-
--- เชื่อมต่อผู้เล่นเพิ่ม/ออก
+-- =====================
+-- 7. PlayerAdded / PlayerRemoving
+-- =====================
 Players.PlayerAdded:Connect(function(p)
+    if ESPNameEnabled then createESP(p) end
+    if TraceEnabled then createTrace(p) end
+    if ESPHighlightEnabled and p.Character then createHighlight(p,p.Character) end
     if ESPItemEnabled then createBillboardForPlayer(p) end
 end)
+
 Players.PlayerRemoving:Connect(function(p)
+    removeTrace(p)
+    cleanupHighlight(p)
     if BillboardCache[p] then
         BillboardCache[p]:Destroy()
-        BillboardCache[p] = nil
+        BillboardCache[p]=nil
     end
-end))
+end)
+
+-- =====================
+-- 8. สร้างให้ผู้เล่นปัจจุบัน
+-- =====================
+for _,p in ipairs(Players:GetPlayers()) do
+    if p~=LocalPlayer then
+        if ESPNameEnabled then createESP(p) end
+        if TraceEnabled then createTrace(p) end
+        if ESPHighlightEnabled and p.Character then createHighlight(p,p.Character) end
+        if ESPItemEnabled then createBillboardForPlayer(p) end
+    end
+end
