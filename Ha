@@ -1,4 +1,4 @@
-local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+ุlocal WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
     Title = "Mystic Hub",
@@ -344,33 +344,20 @@ TabESP:Toggle({
         end
     end
 })
-
--- ESP Item
+-- Toggle UI
 local ESPItemEnabled = false
 TabESP:Toggle({
-    Title="ESP Item",
-    Default=false,
-    Callback=function(state)
+    Title = "ESP Item",
+    Default = false,
+    Callback = function(state)
         ESPItemEnabled = state
         ItemESP_Enabled = state
-        for _,p in ipairs(Players:GetPlayers()) do
-            if ESPItemEnabled then
-                createBillboardForPlayer(p)
-            else
-                if BillboardCache[p] then BillboardCache[p]:Destroy() end
-            end
-        end
+        updateAllPlayersESP()
     end
 })
 
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local ContentProvider = game:GetService("ContentProvider")
-local LocalPlayer = Players.LocalPlayer
-
-local ItemESP_Enabled = true
+-- ตัวแปรและตารางที่ ESP Item ต้องใช้
+local ItemESP_Enabled = false
 local BillboardCache = {}
 local ItemESP_UpdateConnections = {}
 local WeaponDB = {}
@@ -385,21 +372,21 @@ local RARITY_COLORS = {
     ["Omega"] = Color3.fromRGB(255, 20, 51),
 }
 
+-- ฟังก์ชันสร้าง Unique Key ของไอเทม
 local function generateUniqueKey(tool)
     if not tool or not tool:IsA("Tool") then return nil end
-
     local itemId = tool:GetAttribute("ItemId") or tool:GetAttribute("Id")
-    if itemId and itemId ~= "" and (typeof(itemId) == "string" or typeof(itemId) == "number") then
+    if itemId and itemId ~= "" then
         return "ITEMID_" .. tostring(itemId)
     end
 
     local partsData = {}
     for _, part in ipairs(tool:GetDescendants()) do
-        if part:IsA("SpecialMesh") and part.MeshId and part.MeshId ~= "" and part.MeshId ~= "rbxassetid://" then
+        if part:IsA("SpecialMesh") and part.MeshId and part.MeshId ~= "" then
             table.insert(partsData, "MESH_"..part.MeshId.."|TEX_"..(part.TextureId or "NOTEX"))
-        elseif part:IsA("MeshPart") and part.MeshId and part.MeshId ~= "" and part.MeshId ~= "rbxassetid://" then
+        elseif part:IsA("MeshPart") and part.MeshId and part.MeshId ~= "" then
             table.insert(partsData, "MESH_"..part.MeshId.."|TEX_"..(part.TextureID or "NOTEX"))
-        elseif part:IsA("Decal") and part.Texture and part.Texture ~= "" and part.Texture ~= "rbxassetid://" then
+        elseif part:IsA("Decal") and part.Texture and part.Texture ~= "" then
             table.insert(partsData, "DECAL_"..part.Texture)
         elseif part:IsA("Part") then
             table.insert(partsData, "PART_"..part.Name.."_"..part.Size.X.."x"..part.Size.Y.."x"..part.Size.Z)
@@ -418,6 +405,7 @@ local function generateUniqueKey(tool)
     return "NAME_" .. displayName .. "_" .. toolName .. "_" .. rarity .. "_" .. imageId
 end
 
+-- ลงทะเบียนไอเทมทั้งหมด
 local function registerItems(folder)
     for _, tool in ipairs(folder:GetDescendants()) do
         if not tool:IsA("Tool") then continue end
@@ -440,77 +428,138 @@ local function registerItems(folder)
             PreloadedImages[imageId] = true
             task.spawn(function()
                 pcall(function()
-                    ContentProvider:PreloadAsync({imageId})
+                    game:GetService("ContentProvider"):PreloadAsync({imageId})
                 end)
-Local​            end)
+            end)
         end
     end
 end
 
+-- โหลดไอเทมจาก ReplicatedStorage / StarterPack
 pcall(function()
     local itemsFolder = ReplicatedStorage:WaitForChild("Items", 5)
     if itemsFolder then registerItems(itemsFolder) end
-
     for _, obj in ipairs(ReplicatedStorage:GetChildren()) do
         if obj:IsA("Folder") and (obj.Name:find("Weapon") or obj.Name:find("Item") or obj.Name:find("Tool")) then
             registerItems(obj)
         end
     end
-
-        table.insert(connections, char.ChildAdded:Connect(function(child)
-            if child:IsA("Tool") then
-                task.defer(updateESP)
-            end
-        end))
-        table.insert(connections, char.ChildRemoved:Connect(function(child)
-            if child:IsA("Tool") then
-                task.defer(updateESP)
-            end
-        end))
-
-        table.insert(connections, player.ChildAdded:Connect(function(child)
-            if child.Name == "Backpack" then
-                task.wait()
-                table.insert(connections, child.ChildAdded:Connect(updateESP))
-                table.insert(connections, child.ChildRemoved:Connect(updateESP))
-                updateESP()
-            end
-        end))
-    end
-
-    if player.Character then
-        task.spawn(setupBillboard)
-    end
-
-    table.insert(connections, player.CharacterAdded:Connect(function()
-        task.wait(1)
-        setupBillboard()
-    end))
-
-    ItemESP_UpdateConnections[player] = connections
-end
-
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then
-        createBillboardForPlayer(p)
-    end
-end
-
-Players.PlayerAdded:Connect(function(p)
-    if p ~= LocalPlayer then
-        createBillboardForPlayer(p)
-    end
+    registerItems(game:GetService("StarterPack"))
 end)
 
+-- ฟังก์ชันดึงข้อมูลไอเทม
+local function getWeaponInfo(tool)
+    if not tool or not tool:IsA("Tool") then return nil end
+    local key = generateUniqueKey(tool)
+    return WeaponDB[key]
+end
+
+-- ฟังก์ชันสร้าง Billboard ให้ผู้เล่น
+local function createBillboardForPlayer(player)
+    if player == LocalPlayer or BillboardCache[player] then return end
+    if not ESPItemEnabled then return end
+
+    local char = player.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    -- ลบของเดิมถ้ามี
+    if BillboardCache[player] then
+        BillboardCache[player]:Destroy()
+        BillboardCache[player] = nil
+    end
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ItemESP"
+    billboard.Adornee = hrp
+    billboard.Size = UDim2.new(0, 280, 0, 40)
+    billboard.StudsOffset = Vector3.new(0, -6.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.LightInfluence = 0
+    billboard.Parent = hrp
+
+    local container = Instance.new("Frame", billboard)
+    container.Size = UDim2.new(1,0,1,0)
+    container.BackgroundTransparency = 1
+
+    -- ฟังก์ชันอัพเดตไอเทม
+    local function updateESP()
+        if not ItemESP_Enabled or not billboard.Parent then return end
+        local currentTools = {}
+
+        local function scan(folder)
+            if not folder then return end
+            for _, tool in ipairs(folder:GetChildren()) do
+                if tool:IsA("Tool") and tool.Name ~= "Fists" then
+                    local info = getWeaponInfo(tool)
+                    if info then table.insert(currentTools, info) end
+                end
+            end
+        end
+
+        scan(char)
+        local backpack = player:FindFirstChild("Backpack")
+        if backpack then scan(backpack) end
+
+        container:ClearAllChildren()
+        local layout = Instance.new("UIListLayout")
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Padding = UDim.new(0,2)
+        layout.Parent = container
+
+        for i, info in ipairs(currentTools) do
+            local text = Instance.new("TextLabel")
+            text.Size = UDim2.new(1,0,0,14)
+            text.BackgroundTransparency = 1
+            text.TextScaled = true
+            text.Font = Enum.Font.SourceSansBold
+            text.TextColor3 = RARITY_COLORS[info.Rarity] or Color3.fromRGB(255,255,255)
+            text.TextStrokeTransparency = 0
+            text.Text = info.Name or info.ToolName or "Unknown"
+            text.LayoutOrder = i
+            text.Parent = container
+        end
+    end
+
+    -- เชื่อมต่อ Event
+    table.insert(ItemESP_UpdateConnections, char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then task.defer(updateESP) end
+    end))
+    table.insert(ItemESP_UpdateConnections, char.ChildRemoved:Connect(function(child)
+        if child:IsA("Tool") then task.defer(updateESP) end
+    end))
+
+    updateESP()
+    BillboardCache[player] = billboard
+end
+
+-- ฟังก์ชันอัพเดต ESP ให้ผู้เล่นทั้งหมด
+function updateAllPlayersESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if ESPItemEnabled then
+            createBillboardForPlayer(p)
+        else
+            if BillboardCache[p] then
+                BillboardCache[p]:Destroy()
+                BillboardCache[p] = nil
+            end
+        end
+    end
+end
+
+-- สร้าง ESP ให้ผู้เล่นทั้งหมดตอนรัน
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then createBillboardForPlayer(p) end
+end
+
+-- เชื่อมต่อผู้เล่นเพิ่ม/ออก
+Players.PlayerAdded:Connect(function(p)
+    if ESPItemEnabled then createBillboardForPlayer(p) end
+end)
 Players.PlayerRemoving:Connect(function(p)
     if BillboardCache[p] then
         BillboardCache[p]:Destroy()
         BillboardCache[p] = nil
     end
-    if ItemESP_UpdateConnections[p] then
-        for _, conn in pairs(ItemESP_UpdateConnections[p]) do
-            if conn.Connected then conn:Disconnect() end
-        end
-        ItemESP_UpdateConnections[p] = nil
-    end
-end)
+end))
